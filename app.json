@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "StoreManager",
+    "slug": "store-manager",
+    "icon": "./data/assets/UmarketLogo.png",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "storemanager",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "backgroundColor": "#0F172A"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yourname.storemanager",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Camera is used to scan product barcodes.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0F172A"
+      },
+      "package": "com.yourname.storemanager",
+      "permissions": [
+        "CAMERA",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow StoreManager to access your camera to scan barcodes."
+        }
+      ],
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "b5b57202-d9dc-4dba-8dd8-4d81fe4b0d7e"
+      }
+    }
+  }
+}
