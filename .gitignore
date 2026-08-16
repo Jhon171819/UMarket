@@ -4,7 +4,7 @@
 
 expo-env.d.ts
 # @end expo-cli
-
+android/
 node_modules/
 .expo
 .expo/

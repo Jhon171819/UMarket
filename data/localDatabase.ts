@@ -1,5 +1,5 @@
 import { openDatabaseAsync, SQLiteDatabase } from 'expo-sqlite';
-import type { Category, Customer, Product, Sale, Service } from './StoreContext';
+import type { Category, Customer, Product, Sale, Service, StoreConfig } from './StoreContext';
 
 export interface StoreSnapshot {
   products: Product[];
@@ -7,6 +7,7 @@ export interface StoreSnapshot {
   categories: Category[];
   customers: Customer[];
   sales: Sale[];
+  storeConfig: StoreConfig | null;
 }
 
 export interface StoreRepository {
@@ -15,7 +16,7 @@ export interface StoreRepository {
 }
 
 const DATABASE_NAME = 'umarket.db';
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 let databasePromise: Promise<SQLiteDatabase> | null = null;
 
 async function database() {
@@ -94,6 +95,14 @@ async function database() {
     CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date);
     CREATE INDEX IF NOT EXISTS idx_sales_product ON sales(product_id);
 
+    CREATE TABLE IF NOT EXISTS store_settings (
+      id TEXT PRIMARY KEY NOT NULL,
+      company_name TEXT NOT NULL,
+      manager_name TEXT NOT NULL,
+      payment_methods TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     INSERT OR IGNORE INTO migrations (version, applied_at)
       VALUES (1, CURRENT_TIMESTAMP);
   `);
@@ -111,6 +120,9 @@ async function database() {
   if ((latestMigration?.version ?? 0) < 3) {
     await db.runAsync('INSERT OR IGNORE INTO migrations (version, applied_at) VALUES (3, CURRENT_TIMESTAMP)', []);
   }
+  if ((latestMigration?.version ?? 0) < 4) {
+    await db.runAsync('INSERT OR IGNORE INTO migrations (version, applied_at) VALUES (4, CURRENT_TIMESTAMP)', []);
+  }
   return db;
 }
 
@@ -119,17 +131,32 @@ type ServiceRow = { id: string; name: string; price_cents: number; duration_minu
 type CategoryRow = { id: string; name: string; type: Category['type']; active: number };
 type CustomerRow = { id: string; name: string; phone: string; email?: string | null; total_spent_cents: number };
 type SaleRow = { id: string; number: number; item_type: 'PRODUCT' | 'SERVICE'; product_id?: string | null; service_id?: string | null; item_name: string; quantity: number; total_cents: number; payment_method: string; customer_name?: string | null; date: string };
+type StoreConfigRow = { company_name: string; manager_name: string; payment_methods: string };
 
 export class SQLiteStoreRepository implements StoreRepository {
   async load(): Promise<StoreSnapshot> {
     const db = await database();
-    const [products, services, categories, customers, sales] = await Promise.all([
+    const [products, services, categories, customers, sales, configRow] = await Promise.all([
       db.getAllAsync<ProductRow>('SELECT * FROM products ORDER BY name', []),
       db.getAllAsync<ServiceRow>('SELECT * FROM services ORDER BY name', []),
       db.getAllAsync<CategoryRow>('SELECT * FROM categories WHERE active = 1 ORDER BY name', []),
       db.getAllAsync<CustomerRow>('SELECT * FROM customers ORDER BY name', []),
       db.getAllAsync<SaleRow>('SELECT * FROM sales ORDER BY date DESC', []),
+      db.getFirstAsync<StoreConfigRow>('SELECT company_name, manager_name, payment_methods FROM store_settings WHERE id = ?', ['main']),
     ]);
+
+    let storeConfig: StoreConfig | null = null;
+    if (configRow) {
+      try {
+        storeConfig = {
+          companyName: configRow.company_name,
+          managerName: configRow.manager_name,
+          paymentMethods: JSON.parse(configRow.payment_methods),
+        };
+      } catch {
+        storeConfig = null;
+      }
+    }
 
     return {
       products: products.map(row => ({ id: row.id, name: row.name, barcode: row.barcode, priceCents: row.price_cents, costCents: row.cost_cents, stock: row.stock, category: row.category, lowStockAlert: row.low_stock_alert, unit: row.unit, active: Boolean(row.active) })),
@@ -137,13 +164,18 @@ export class SQLiteStoreRepository implements StoreRepository {
       categories: categories.map(row => ({ id: row.id, name: row.name, type: row.type, active: Boolean(row.active) })),
       customers: customers.map(row => ({ id: row.id, name: row.name, phone: row.phone, email: row.email ?? undefined, totalSpentCents: row.total_spent_cents })),
       sales: sales.map(row => ({ id: row.id, number: row.number, itemType: row.item_type, productId: row.product_id ?? undefined, serviceId: row.service_id ?? undefined, itemName: row.item_name, quantity: row.quantity, totalCents: row.total_cents, paymentMethod: row.payment_method, customerName: row.customer_name ?? undefined, date: row.date })),
+      storeConfig,
     };
   }
 
   async replace(snapshot: StoreSnapshot): Promise<void> {
     const db = await database();
     await db.withExclusiveTransactionAsync(async transaction => {
-      await transaction.execAsync('DELETE FROM products; DELETE FROM services; DELETE FROM categories; DELETE FROM customers; DELETE FROM sales;');
+      await transaction.execAsync('DELETE FROM products; DELETE FROM services; DELETE FROM categories; DELETE FROM customers; DELETE FROM sales; DELETE FROM store_settings;');
+
+      if (snapshot.storeConfig) {
+        await transaction.runAsync('INSERT INTO store_settings (id, company_name, manager_name, payment_methods) VALUES (?, ?, ?, ?)', ['main', snapshot.storeConfig.companyName, snapshot.storeConfig.managerName, JSON.stringify(snapshot.storeConfig.paymentMethods)]);
+      }
 
       for (const category of snapshot.categories) {
         await transaction.runAsync('INSERT INTO categories (id, name, type, active) VALUES (?, ?, ?, ?)', [category.id, category.name, category.type, category.active ? 1 : 0]);

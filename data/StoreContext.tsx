@@ -52,8 +52,24 @@ export interface Sale {
   date: string;
 }
 
+export interface PaymentMethodConfig {
+  id: string;
+  name: string;
+  enabled: boolean;
+  surchargeEnabled: boolean;
+  surchargePercent: number;
+  pixKey?: string;
+}
+
+export interface StoreConfig {
+  companyName: string;
+  managerName: string;
+  paymentMethods: PaymentMethodConfig[];
+}
+
 interface StoreContextType {
   hydrated: boolean;
+  storeConfig: StoreConfig | null;
   products: Product[];
   services: Service[];
   categories: Category[];
@@ -69,6 +85,7 @@ interface StoreContextType {
   addCategory: (name: string, type?: Category['type']) => void;
   addCustomer: (customer: Omit<Customer, 'id' | 'totalSpentCents'>) => void;
   addSale: (sale: Omit<Sale, 'id' | 'number' | 'date'>) => void;
+  completeSetup: (config: StoreConfig) => void;
   findByBarcode: (barcode: string) => Product | undefined;
 }
 
@@ -80,6 +97,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
+  const [storeConfig, setStoreConfig] = useState<StoreConfig | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -89,15 +107,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setCategories(state.categories);
       setCustomers(state.customers);
       setSales(state.sales);
+      setStoreConfig(state.storeConfig);
       setHydrated(true);
     }).catch(() => setHydrated(true));
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    const state: StoreSnapshot = { products, services, categories, customers, sales };
+    const state: StoreSnapshot = { products, services, categories, customers, sales, storeConfig };
     storeRepository.replace(state).catch(() => undefined);
-  }, [products, services, categories, customers, sales, hydrated]);
+  }, [products, services, categories, customers, sales, storeConfig, hydrated]);
 
   const addProduct = (product: Omit<Product, 'id' | 'active'>) => {
     setProducts(current => [...current, { ...product, id: `p-${Date.now()}`, active: true }]);
@@ -144,8 +163,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const completeSetup = (config: StoreConfig) => setStoreConfig(config);
+
   const value = useMemo(() => ({
     hydrated,
+    storeConfig,
     products,
     services,
     categories,
@@ -161,8 +183,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     addCategory,
     addCustomer,
     addSale,
+    completeSetup,
     findByBarcode: (barcode: string) => products.find(product => product.barcode === barcode && product.active),
-  }), [hydrated, products, services, categories, customers, sales]);
+  }), [hydrated, storeConfig, products, services, categories, customers, sales]);
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }

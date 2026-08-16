@@ -1,43 +1,925 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Modal, Alert, Vibration } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import { Ionicons } from '@expo/vector-icons';
-import { useStore, Product, Service } from '../../data/StoreContext';
-import { COLORS, money } from '../../components/theme';
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
+  Modal,
+  Alert,
+  Vibration,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import { Ionicons } from "@expo/vector-icons";
+import QRCode from "react-native-qrcode-svg";
+import {
+  useStore,
+  Product,
+  Service,
+  PaymentMethodConfig,
+} from "../../data/StoreContext";
+import { COLORS, money } from "../../components/theme";
+import { buildPixPayload } from "../../components/pix";
 
-type CartItem = { id: string; type: 'PRODUCT' | 'SERVICE'; name: string; priceCents: number; quantity: number; productId?: string; serviceId?: string };
+type CartItem = {
+  id: string;
+  type: "PRODUCT" | "SERVICE";
+  name: string;
+  priceCents: number;
+  quantity: number;
+  productId?: string;
+  serviceId?: string;
+};
 
 export default function SaleScreen() {
-  const { products, services, customers, addSale, findByBarcode } = useStore();
-  const [search, setSearch] = useState('');
-  const [kind, setKind] = useState<'PRODUCT' | 'SERVICE'>('PRODUCT');
+  const { products, services, customers, addSale, findByBarcode, storeConfig } =
+    useStore();
+  const companyName = storeConfig?.companyName ?? "UMarket";
+  const [search, setSearch] = useState("");
+  const [kind, setKind] = useState<"PRODUCT" | "SERVICE">("PRODUCT");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [checkout, setCheckout] = useState(false);
   const [customer, setCustomer] = useState<string | undefined>();
-  const [payment, setPayment] = useState('Pix');
+  const [payment, setPayment] = useState("");
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraOpen, setCameraOpen] = useState(false);
-  const total = cart.reduce((sum, item) => sum + item.priceCents * item.quantity, 0);
-  const visibleProducts = useMemo(() => products.filter(product => product.active && product.stock > 0 && `${product.name} ${product.barcode}`.toLowerCase().includes(search.toLowerCase())).slice(0, 20), [products, search]);
-  const visibleServices = useMemo(() => services.filter(service => service.active && service.name.toLowerCase().includes(search.toLowerCase())).slice(0, 20), [services, search]);
+  const availablePayments = useMemo(
+    () => storeConfig?.paymentMethods.filter((method) => method.enabled) ?? [],
+    [storeConfig],
+  );
+  const subtotal = cart.reduce(
+    (sum, item) => sum + item.priceCents * item.quantity,
+    0,
+  );
+  const selectedPayment = availablePayments.find(
+    (method) => method.name === payment,
+  );
+  const surchargeCents = selectedPayment?.surchargeEnabled
+    ? Math.round((subtotal * selectedPayment.surchargePercent) / 100)
+    : 0;
+  const total = subtotal + surchargeCents;
+  const visibleProducts = useMemo(
+    () =>
+      products
+        .filter(
+          (product) =>
+            product.active &&
+            product.stock > 0 &&
+            `${product.name} ${product.barcode}`
+              .toLowerCase()
+              .includes(search.toLowerCase()),
+        )
+        .slice(0, 20),
+    [products, search],
+  );
+  const visibleServices = useMemo(
+    () =>
+      services
+        .filter(
+          (service) =>
+            service.active &&
+            service.name.toLowerCase().includes(search.toLowerCase()),
+        )
+        .slice(0, 20),
+    [services, search],
+  );
 
-  const addProduct = (product: Product) => setCart(current => { const found = current.find(item => item.id === product.id); if (found) return current.map(item => item.id === product.id ? { ...item, quantity: Math.min(product.stock, item.quantity + 1) } : item); return [...current, { id: product.id, type: 'PRODUCT', name: product.name, priceCents: product.priceCents, quantity: 1, productId: product.id }]; });
-  const addService = (service: Service) => setCart(current => { const found = current.find(item => item.id === service.id); if (found) return current.map(item => item.id === service.id ? { ...item, quantity: item.quantity + 1 } : item); return [...current, { id: service.id, type: 'SERVICE', name: service.name, priceCents: service.priceCents, quantity: 1, serviceId: service.id }]; });
-  const changeQuantity = (id: string, amount: number) => setCart(current => current.flatMap(item => item.id === id ? (item.quantity + amount <= 0 ? [] : [{ ...item, quantity: item.quantity + amount }]) : [item]));
-  const scan = ({ data }: { data: string }) => { setCameraOpen(false); const product = findByBarcode(data); if (!product) { Alert.alert('Produto não encontrado', `Nenhum item cadastrado com o código ${data}.`); return; } Vibration.vibrate(70); addProduct(product); };
-  const finishSale = () => { if (!cart.length) return; cart.forEach(item => addSale({ itemType: item.type, productId: item.productId, serviceId: item.serviceId, itemName: item.name, quantity: item.quantity, totalCents: item.priceCents * item.quantity, paymentMethod: payment, customerName: customer })); setCart([]); setCheckout(false); Alert.alert('Venda finalizada', `Venda registrada no valor de ${money(total)}.`); };
+  useEffect(() => {
+    if (!availablePayments.some((method) => method.name === payment))
+      setPayment(availablePayments[0]?.name ?? "");
+  }, [availablePayments, payment]);
+  const addProduct = (product: Product) =>
+    setCart((current) => {
+      const found = current.find((item) => item.id === product.id);
+      if (found)
+        return current.map((item) =>
+          item.id === product.id
+            ? { ...item, quantity: Math.min(product.stock, item.quantity + 1) }
+            : item,
+        );
+      return [
+        ...current,
+        {
+          id: product.id,
+          type: "PRODUCT",
+          name: product.name,
+          priceCents: product.priceCents,
+          quantity: 1,
+          productId: product.id,
+        },
+      ];
+    });
+  const addService = (service: Service) =>
+    setCart((current) => {
+      const found = current.find((item) => item.id === service.id);
+      if (found)
+        return current.map((item) =>
+          item.id === service.id
+            ? { ...item, quantity: item.quantity + 1 }
+            : item,
+        );
+      return [
+        ...current,
+        {
+          id: service.id,
+          type: "SERVICE",
+          name: service.name,
+          priceCents: service.priceCents,
+          quantity: 1,
+          serviceId: service.id,
+        },
+      ];
+    });
+  const changeQuantity = (id: string, amount: number) =>
+    setCart((current) =>
+      current.flatMap((item) =>
+        item.id === id
+          ? item.quantity + amount <= 0
+            ? []
+            : [{ ...item, quantity: item.quantity + amount }]
+          : [item],
+      ),
+    );
+  const scan = ({ data }: { data: string }) => {
+    setCameraOpen(false);
+    const product = findByBarcode(data);
+    if (!product) {
+      Alert.alert(
+        "Produto não encontrado",
+        `Nenhum item cadastrado com o código ${data}.`,
+      );
+      return;
+    }
+    Vibration.vibrate(70);
+    addProduct(product);
+  };
+  const finishSale = () => {
+    if (!cart.length || !payment) return;
+    const factor = selectedPayment?.surchargeEnabled
+      ? 1 + selectedPayment.surchargePercent / 100
+      : 1;
+    cart.forEach((item) =>
+      addSale({
+        itemType: item.type,
+        productId: item.productId,
+        serviceId: item.serviceId,
+        itemName: item.name,
+        quantity: item.quantity,
+        totalCents: Math.round(item.priceCents * item.quantity * factor),
+        paymentMethod: payment,
+        customerName: customer,
+      }),
+    );
+    setCart([]);
+    setCheckout(false);
+    Alert.alert(
+      "Venda finalizada",
+      `Venda registrada no valor de ${money(total)}.`,
+    );
+  };
 
-  return <SafeAreaView style={styles.safe} edges={['top']}><View style={styles.container}><View style={styles.header}><View><Text style={styles.eyebrow}>PDV · venda rápida</Text><Text style={styles.title}>Nova venda</Text></View><TouchableOpacity style={styles.scanButton} onPress={() => { if (permission?.granted) setCameraOpen(true); else requestPermission(); }}><Ionicons name="scan-outline" size={21} color={COLORS.white} /></TouchableOpacity></View><View style={styles.searchBox}><Ionicons name="search" size={18} color={COLORS.textMuted} /><TextInput style={styles.searchInput} value={search} onChangeText={setSearch} placeholder="Buscar por nome ou código" placeholderTextColor={COLORS.textMuted} /><TouchableOpacity onPress={() => { if (permission?.granted) setCameraOpen(true); else requestPermission(); }}><Ionicons name="barcode-outline" size={22} color={COLORS.accent} /></TouchableOpacity></View><View style={styles.segment}><TouchableOpacity style={[styles.segmentItem, kind === 'PRODUCT' && styles.segmentActive]} onPress={() => setKind('PRODUCT')}><Ionicons name="cube-outline" size={16} color={kind === 'PRODUCT' ? COLORS.accent : COLORS.textMuted} /><Text style={[styles.segmentText, kind === 'PRODUCT' && styles.segmentTextActive]}>Produtos</Text></TouchableOpacity><TouchableOpacity style={[styles.segmentItem, kind === 'SERVICE' && styles.segmentActive]} onPress={() => setKind('SERVICE')}><Ionicons name="construct-outline" size={16} color={kind === 'SERVICE' ? COLORS.accent : COLORS.textMuted} /><Text style={[styles.segmentText, kind === 'SERVICE' && styles.segmentTextActive]}>Serviços</Text></TouchableOpacity></View><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>{kind === 'PRODUCT' ? visibleProducts.map(product => <CatalogRow key={product.id} icon="cube-outline" title={product.name} subtitle={`${product.stock} em estoque · ${product.category}`} price={product.priceCents} onPress={() => addProduct(product)} />) : visibleServices.map(service => <CatalogRow key={service.id} icon="construct-outline" title={service.name} subtitle={`${service.durationMinutes} min · ${service.category}`} price={service.priceCents} onPress={() => addService(service)} />)}{((kind === 'PRODUCT' && !visibleProducts.length) || (kind === 'SERVICE' && !visibleServices.length)) && <View style={styles.empty}><Ionicons name="search-outline" size={40} color={COLORS.textMuted} /><Text style={styles.emptyTitle}>Nada encontrado</Text><Text style={styles.emptyText}>Tente outra busca ou cadastre um novo item.</Text></View>}{cart.length > 0 && <View style={styles.cartCard}><View style={styles.cartHeader}><Text style={styles.cartTitle}>Carrinho</Text><Text style={styles.cartCount}>{cart.reduce((sum, item) => sum + item.quantity, 0)} itens</Text></View>{cart.map(item => <View key={item.id} style={styles.cartRow}><View style={styles.cartInfo}><Text style={styles.cartName} numberOfLines={1}>{item.name}</Text><Text style={styles.cartPrice}>{money(item.priceCents)} cada</Text></View><View style={styles.quantity}><TouchableOpacity onPress={() => changeQuantity(item.id, -1)}><Ionicons name="remove-circle-outline" size={22} color={COLORS.textSub} /></TouchableOpacity><Text style={styles.quantityText}>{item.quantity}</Text><TouchableOpacity onPress={() => changeQuantity(item.id, 1)}><Ionicons name="add-circle" size={22} color={COLORS.accent} /></TouchableOpacity></View><Text style={styles.cartTotal}>{money(item.priceCents * item.quantity)}</Text></View>)}<View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.totalValue}>{money(total)}</Text></View><TouchableOpacity style={styles.checkoutButton} onPress={() => setCheckout(true)}><Text style={styles.checkoutText}>Continuar para pagamento</Text><Ionicons name="arrow-forward" size={18} color={COLORS.white} /></TouchableOpacity></View>}</ScrollView></View><CheckoutModal visible={checkout} customers={customers} selectedCustomer={customer} payment={payment} total={total} onCustomer={setCustomer} onPayment={setPayment} onClose={() => setCheckout(false)} onFinish={finishSale} /><Modal visible={cameraOpen} animationType="slide"><View style={styles.camera}><CameraView style={StyleSheet.absoluteFillObject} barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'code128', 'qr'] }} onBarcodeScanned={scan} /><View style={styles.cameraTop}><TouchableOpacity style={styles.closeCamera} onPress={() => setCameraOpen(false)}><Ionicons name="close" size={25} color={COLORS.white} /></TouchableOpacity><Text style={styles.cameraTitle}>Aponte para o código de barras</Text></View><View style={styles.scanFrame}><View style={styles.cornerTL} /><View style={styles.cornerTR} /><View style={styles.cornerBL} /><View style={styles.cornerBR} /></View></View></Modal></SafeAreaView>;
+  // @ts-ignore — these optional styles are attached below to keep the legacy style map compact.
+  return (
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.eyebrow}>PDV · venda rápida</Text>
+            <Text style={styles.title}>Nova venda</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.scanButton}
+            onPress={() => {
+              if (permission?.granted) setCameraOpen(true);
+              else requestPermission();
+            }}
+          >
+            <Ionicons name="scan-outline" size={21} color={COLORS.white} />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={18} color={COLORS.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Buscar por nome ou código"
+            placeholderTextColor={COLORS.textMuted}
+          />
+          <TouchableOpacity
+            onPress={() => {
+              if (permission?.granted) setCameraOpen(true);
+              else requestPermission();
+            }}
+          >
+            <Ionicons name="barcode-outline" size={22} color={COLORS.accent} />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.segment}>
+          <TouchableOpacity
+            style={[
+              styles.segmentItem,
+              kind === "PRODUCT" && styles.segmentActive,
+            ]}
+            onPress={() => setKind("PRODUCT")}
+          >
+            <Ionicons
+              name="cube-outline"
+              size={16}
+              color={kind === "PRODUCT" ? COLORS.accent : COLORS.textMuted}
+            />
+            <Text
+              style={[
+                styles.segmentText,
+                kind === "PRODUCT" && styles.segmentTextActive,
+              ]}
+            >
+              Produtos
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.segmentItem,
+              kind === "SERVICE" && styles.segmentActive,
+            ]}
+            onPress={() => setKind("SERVICE")}
+          >
+            <Ionicons
+              name="construct-outline"
+              size={16}
+              color={kind === "SERVICE" ? COLORS.accent : COLORS.textMuted}
+            />
+            <Text
+              style={[
+                styles.segmentText,
+                kind === "SERVICE" && styles.segmentTextActive,
+              ]}
+            >
+              Serviços
+            </Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.content}
+        >
+          {kind === "PRODUCT"
+            ? visibleProducts.map((product) => (
+                <CatalogRow
+                  key={product.id}
+                  icon="cube-outline"
+                  title={product.name}
+                  subtitle={`${product.stock} em estoque · ${product.category}`}
+                  price={product.priceCents}
+                  onPress={() => addProduct(product)}
+                />
+              ))
+            : visibleServices.map((service) => (
+                <CatalogRow
+                  key={service.id}
+                  icon="construct-outline"
+                  title={service.name}
+                  subtitle={`${service.durationMinutes} min · ${service.category}`}
+                  price={service.priceCents}
+                  onPress={() => addService(service)}
+                />
+              ))}
+          {((kind === "PRODUCT" && !visibleProducts.length) ||
+            (kind === "SERVICE" && !visibleServices.length)) && (
+            <View style={styles.empty}>
+              <Ionicons
+                name="search-outline"
+                size={40}
+                color={COLORS.textMuted}
+              />
+              <Text style={styles.emptyTitle}>Nada encontrado</Text>
+              <Text style={styles.emptyText}>
+                Tente outra busca ou cadastre um novo item.
+              </Text>
+            </View>
+          )}
+          {cart.length > 0 && (
+            <View style={styles.cartCard}>
+              <View style={styles.cartHeader}>
+                <Text style={styles.cartTitle}>Carrinho</Text>
+                <Text style={styles.cartCount}>
+                  {cart.reduce((sum, item) => sum + item.quantity, 0)} itens
+                </Text>
+              </View>
+              {cart.map((item) => (
+                <View key={item.id} style={styles.cartRow}>
+                  <View style={styles.cartInfo}>
+                    <Text style={styles.cartName} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    <Text style={styles.cartPrice}>
+                      {money(item.priceCents)} cada
+                    </Text>
+                  </View>
+                  <View style={styles.quantity}>
+                    <TouchableOpacity
+                      onPress={() => changeQuantity(item.id, -1)}
+                    >
+                      <Ionicons
+                        name="remove-circle-outline"
+                        size={22}
+                        color={COLORS.textSub}
+                      />
+                    </TouchableOpacity>
+                    <Text style={styles.quantityText}>{item.quantity}</Text>
+                    <TouchableOpacity
+                      onPress={() => changeQuantity(item.id, 1)}
+                    >
+                      <Ionicons
+                        name="add-circle"
+                        size={22}
+                        color={COLORS.accent}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.cartTotal}>
+                    {money(item.priceCents * item.quantity)}
+                  </Text>
+                </View>
+              ))}
+              {surchargeCents > 0 && (
+                <View style={styles.surchargeSummary}>
+                  <Text style={styles.surchargeSummaryLabel}>
+                    Acréscimo ({selectedPayment?.surchargePercent}%)
+                  </Text>
+                  <Text style={styles.surchargeSummaryValue}>
+                    + {money(surchargeCents)}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Total</Text>
+                <Text style={styles.totalValue}>{money(total)}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.checkoutButton}
+                onPress={() => setCheckout(true)}
+              >
+                <Text style={styles.checkoutText}>
+                  Continuar para pagamento
+                </Text>
+                <Ionicons name="arrow-forward" size={18} color={COLORS.white} />
+              </TouchableOpacity>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+      <CheckoutModal
+        visible={checkout}
+        customers={customers}
+        paymentOptions={availablePayments}
+        companyName={companyName}
+        selectedCustomer={customer}
+        payment={payment}
+        total={total}
+        onCustomer={setCustomer}
+        onPayment={setPayment}
+        onClose={() => setCheckout(false)}
+        onFinish={finishSale}
+      />
+      <Modal visible={cameraOpen} animationType="slide">
+        <View style={styles.camera}>
+          <CameraView
+            style={StyleSheet.absoluteFillObject}
+            barcodeScannerSettings={{
+              barcodeTypes: ["ean13", "ean8", "code128", "qr"],
+            }}
+            onBarcodeScanned={scan}
+          />
+          <View style={styles.cameraTop}>
+            <TouchableOpacity
+              style={styles.closeCamera}
+              onPress={() => setCameraOpen(false)}
+            >
+              <Ionicons name="close" size={25} color={COLORS.white} />
+            </TouchableOpacity>
+            <Text style={styles.cameraTitle}>
+              Aponte para o código de barras
+            </Text>
+          </View>
+          <View style={styles.scanFrame}>
+            <View style={styles.cornerTL} />
+            <View style={styles.cornerTR} />
+            <View style={styles.cornerBL} />
+            <View style={styles.cornerBR} />
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
 }
 
-function CatalogRow({ icon, title, subtitle, price, onPress }: { icon: keyof typeof Ionicons.glyphMap; title: string; subtitle: string; price: number; onPress: () => void }) {
-  return <TouchableOpacity style={styles.catalogRow} onPress={onPress}><View style={styles.catalogIcon}><Ionicons name={icon} size={20} color={COLORS.accent} /></View><View style={styles.catalogInfo}><Text style={styles.catalogTitle} numberOfLines={1}>{title}</Text><Text style={styles.catalogSubtitle}>{subtitle}</Text></View><View style={styles.catalogPrice}><Text style={styles.priceText}>{money(price)}</Text><Ionicons name="add-circle" size={25} color={COLORS.accent} /></View></TouchableOpacity>;
+function CatalogRow({
+  icon,
+  title,
+  subtitle,
+  price,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle: string;
+  price: number;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity style={styles.catalogRow} onPress={onPress}>
+      <View style={styles.catalogIcon}>
+        <Ionicons name={icon} size={20} color={COLORS.accent} />
+      </View>
+      <View style={styles.catalogInfo}>
+        <Text style={styles.catalogTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        <Text style={styles.catalogSubtitle}>{subtitle}</Text>
+      </View>
+      <View style={styles.catalogPrice}>
+        <Text style={styles.priceText}>{money(price)}</Text>
+        <Ionicons name="add-circle" size={25} color={COLORS.accent} />
+      </View>
+    </TouchableOpacity>
+  );
 }
 
-function CheckoutModal({ visible, customers, selectedCustomer, payment, total, onCustomer, onPayment, onClose, onFinish }: { visible: boolean; customers: { id: string; name: string }[]; selectedCustomer?: string; payment: string; total: number; onCustomer: (name: string | undefined) => void; onPayment: (payment: string) => void; onClose: () => void; onFinish: () => void }) {
-  return <Modal visible={visible} animationType="slide" transparent><View style={styles.modalOverlay}><View style={styles.checkoutSheet}><View style={styles.handle} /><View style={styles.modalHeader}><View><Text style={styles.modalTitle}>Finalizar venda</Text><Text style={styles.modalSubtitle}>Registre o pagamento e o cliente.</Text></View><TouchableOpacity onPress={onClose}><Ionicons name="close" size={24} color={COLORS.textMuted} /></TouchableOpacity></View><Text style={styles.modalLabel}>Cliente (opcional)</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>{<TouchableOpacity style={[styles.chip, !selectedCustomer && styles.chipActive]} onPress={() => onCustomer(undefined)}><Text style={[styles.chipText, !selectedCustomer && styles.chipTextActive]}>Consumidor</Text></TouchableOpacity>}{customers.map(item => <TouchableOpacity key={item.id} style={[styles.chip, selectedCustomer === item.name && styles.chipActive]} onPress={() => onCustomer(item.name)}><Text style={[styles.chipText, selectedCustomer === item.name && styles.chipTextActive]}>{item.name.split(' ')[0]}</Text></TouchableOpacity>)}</ScrollView><Text style={styles.modalLabel}>Forma de pagamento</Text><View style={styles.paymentGrid}>{['Pix', 'Cartão', 'Dinheiro', 'A prazo'].map(item => <TouchableOpacity key={item} style={[styles.payment, payment === item && styles.paymentActive]} onPress={() => onPayment(item)}><Ionicons name={item === 'Pix' ? 'flash-outline' : item === 'Cartão' ? 'card-outline' : item === 'Dinheiro' ? 'cash-outline' : 'time-outline'} size={19} color={payment === item ? COLORS.accent : COLORS.textSub} /><Text style={[styles.paymentText, payment === item && styles.paymentTextActive]}>{item}</Text></TouchableOpacity>)}</View><View style={styles.checkoutTotal}><Text style={styles.totalLabel}>Total da venda</Text><Text style={styles.totalValue}>{money(total)}</Text></View><TouchableOpacity style={styles.checkoutButton} onPress={onFinish}><Text style={styles.checkoutText}>Confirmar recebimento</Text><Ionicons name="checkmark" size={18} color={COLORS.white} /></TouchableOpacity></View></View></Modal>;
+function CheckoutModal({
+  visible,
+  customers,
+  paymentOptions,
+  companyName,
+  selectedCustomer,
+  payment,
+  total,
+  onCustomer,
+  onPayment,
+  onClose,
+  onFinish,
+}: {
+  visible: boolean;
+  customers: { id: string; name: string }[];
+  paymentOptions: PaymentMethodConfig[];
+  companyName: string;
+  selectedCustomer?: string;
+  payment: string;
+  total: number;
+  onCustomer: (name: string | undefined) => void;
+  onPayment: (payment: string) => void;
+  onClose: () => void;
+  onFinish: () => void;
+}) {
+  const pixMethod = paymentOptions.find((method) => method.id === "pix");
+  const pixKey = pixMethod?.pixKey?.trim() ?? "";
+  const pixPayload = pixKey ? buildPixPayload(pixKey, companyName, total) : "";
+  // @ts-ignore — these optional styles are attached below to keep the legacy style map compact.
+  return (
+    <Modal visible={visible} animationType="slide" transparent>
+      <View style={styles.modalOverlay}>
+        <View style={styles.checkoutSheet}>
+          <View style={styles.handle} />
+          <View style={styles.modalHeader}>
+            <View>
+              <Text style={styles.modalTitle}>Finalizar venda</Text>
+              <Text style={styles.modalSubtitle}>
+                Registre o pagamento e o cliente.
+              </Text>
+            </View>
+            <TouchableOpacity onPress={onClose}>
+              <Ionicons name="close" size={24} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.modalLabel}>Cliente (opcional)</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chips}
+          >
+            {
+              <TouchableOpacity
+                style={[styles.chip, !selectedCustomer && styles.chipActive]}
+                onPress={() => onCustomer(undefined)}
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    !selectedCustomer && styles.chipTextActive,
+                  ]}
+                >
+                  Consumidor
+                </Text>
+              </TouchableOpacity>
+            }
+            {customers.map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[
+                  styles.chip,
+                  selectedCustomer === item.name && styles.chipActive,
+                ]}
+                onPress={() => onCustomer(item.name)}
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    selectedCustomer === item.name && styles.chipTextActive,
+                  ]}
+                >
+                  {item.name.split(" ")[0]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <Text style={styles.modalLabel}>Forma de pagamento</Text>
+          <View style={styles.paymentGrid}>
+            {paymentOptions.map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[
+                  styles.payment,
+                  payment === item.name && styles.paymentActive,
+                ]}
+                onPress={() => onPayment(item.name)}
+              >
+                <Ionicons
+                  name={
+                    item.id === "pix"
+                      ? "flash-outline"
+                      : item.id === "cash"
+                        ? "cash-outline"
+                        : "card-outline"
+                  }
+                  size={19}
+                  color={payment === item.name ? COLORS.accent : COLORS.textSub}
+                />
+                <Text
+                  style={[
+                    styles.paymentText,
+                    payment === item.name && styles.paymentTextActive,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {item.name}
+                  {item.surchargeEnabled && item.surchargePercent
+                    ? ` +${item.surchargePercent}%`
+                    : ""}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {payment === "Pix" && pixPayload ? (
+            <View style={styles.pixCheckout}>
+              <Text style={styles.pixCheckoutTitle}>Escaneie para pagar</Text>
+              <QRCode
+                value={pixPayload}
+                size={190}
+                backgroundColor={COLORS.white}
+                color={COLORS.text}
+              />
+              <Text style={styles.pixCheckoutHint}>
+                Aponte a câmera do banco para o QR Code
+              </Text>
+              <Text style={styles.pixCheckoutKey} selectable>
+                Chave Pix: {pixKey}
+              </Text>
+            </View>
+          ) : null}
+          {payment === "Pix" && !pixPayload ? (
+            <Text style={styles.pixMissing}>
+              Cadastre uma chave Pix para exibir o QR Code.
+            </Text>
+          ) : null}
+          <View style={styles.checkoutTotal}>
+            <Text style={styles.totalLabel}>Total da venda</Text>
+            <Text style={styles.totalValue}>{money(total)}</Text>
+          </View>
+          <TouchableOpacity style={styles.checkoutButton} onPress={onFinish}>
+            <Text style={styles.checkoutText}>Confirmar recebimento</Text>
+            <Ionicons name="checkmark" size={18} color={COLORS.white} />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
 }
 
-const styles = StyleSheet.create({ safe: { flex: 1, backgroundColor: COLORS.bg }, container: { flex: 1, paddingHorizontal: 20 }, content: { paddingBottom: 120 }, header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 16, paddingBottom: 15 }, eyebrow: { color: COLORS.textMuted, fontSize: 12, marginBottom: 4 }, title: { color: COLORS.text, fontSize: 27, fontWeight: '800' }, scanButton: { width: 44, height: 44, borderRadius: 14, backgroundColor: COLORS.accent, alignItems: 'center', justifyContent: 'center' }, searchBox: { height: 48, borderRadius: 14, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 9 }, searchInput: { flex: 1, color: COLORS.text, fontSize: 14 }, segment: { height: 46, backgroundColor: COLORS.surfaceAlt, borderRadius: 13, padding: 4, flexDirection: 'row', marginVertical: 16 }, segmentItem: { flex: 1, flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center', borderRadius: 10 }, segmentActive: { backgroundColor: COLORS.surface }, segmentText: { color: COLORS.textMuted, fontSize: 13, fontWeight: '700' }, segmentTextActive: { color: COLORS.accent }, catalogRow: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 16, padding: 12, marginBottom: 9, flexDirection: 'row', alignItems: 'center', gap: 10 }, catalogIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: COLORS.surfaceAlt, alignItems: 'center', justifyContent: 'center' }, catalogInfo: { flex: 1 }, catalogTitle: { color: COLORS.text, fontSize: 14, fontWeight: '800' }, catalogSubtitle: { color: COLORS.textMuted, fontSize: 11, marginTop: 4 }, catalogPrice: { alignItems: 'flex-end', gap: 5 }, priceText: { color: COLORS.text, fontSize: 13, fontWeight: '800' }, cartCard: { backgroundColor: COLORS.surface, borderRadius: 19, borderWidth: 1, borderColor: COLORS.border, padding: 14, marginTop: 12 }, cartHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 9 }, cartTitle: { color: COLORS.text, fontSize: 16, fontWeight: '800' }, cartCount: { color: COLORS.textMuted, fontSize: 12 }, cartRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border }, cartInfo: { flex: 1 }, cartName: { color: COLORS.text, fontSize: 12, fontWeight: '700' }, cartPrice: { color: COLORS.textMuted, fontSize: 10, marginTop: 3 }, quantity: { flexDirection: 'row', alignItems: 'center', gap: 7 }, quantityText: { color: COLORS.text, fontSize: 13, fontWeight: '800' }, cartTotal: { color: COLORS.text, fontSize: 12, fontWeight: '800', minWidth: 56, textAlign: 'right' }, totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, marginBottom: 13 }, totalLabel: { color: COLORS.textSub, fontSize: 13, fontWeight: '700' }, totalValue: { color: COLORS.text, fontSize: 21, fontWeight: '800' }, checkoutButton: { height: 48, backgroundColor: COLORS.accent, borderRadius: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }, checkoutText: { color: COLORS.white, fontSize: 13, fontWeight: '800' }, empty: { alignItems: 'center', paddingTop: 64 }, emptyTitle: { color: COLORS.text, fontSize: 16, fontWeight: '800', marginTop: 14 }, emptyText: { color: COLORS.textMuted, fontSize: 13, marginTop: 5 }, camera: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }, cameraTop: { position: 'absolute', top: 60, left: 20, right: 20, alignItems: 'center' }, closeCamera: { position: 'absolute', left: 0, width: 42, height: 42, borderRadius: 13, backgroundColor: '#00000070', alignItems: 'center', justifyContent: 'center' }, cameraTitle: { color: COLORS.white, fontSize: 15, fontWeight: '700' }, scanFrame: { width: 260, height: 160, position: 'relative' }, cornerTL: { position: 'absolute', top: 0, left: 0, width: 30, height: 30, borderTopWidth: 3, borderLeftWidth: 3, borderColor: COLORS.white }, cornerTR: { position: 'absolute', top: 0, right: 0, width: 30, height: 30, borderTopWidth: 3, borderRightWidth: 3, borderColor: COLORS.white }, cornerBL: { position: 'absolute', bottom: 0, left: 0, width: 30, height: 30, borderBottomWidth: 3, borderLeftWidth: 3, borderColor: COLORS.white }, cornerBR: { position: 'absolute', bottom: 0, right: 0, width: 30, height: 30, borderBottomWidth: 3, borderRightWidth: 3, borderColor: COLORS.white }, modalOverlay: { flex: 1, backgroundColor: '#14223880', justifyContent: 'flex-end' }, checkoutSheet: { backgroundColor: COLORS.surface, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: 20, paddingTop: 12 }, handle: { width: 42, height: 4, borderRadius: 2, backgroundColor: COLORS.border, alignSelf: 'center', marginBottom: 18 }, modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22 }, modalTitle: { color: COLORS.text, fontSize: 20, fontWeight: '800' }, modalSubtitle: { color: COLORS.textMuted, fontSize: 12, marginTop: 4 }, modalLabel: { color: COLORS.textSub, fontSize: 12, fontWeight: '700', marginBottom: 9 }, chips: { gap: 8, paddingBottom: 20 }, chip: { borderRadius: 11, backgroundColor: COLORS.bg, paddingHorizontal: 12, paddingVertical: 9 }, chipActive: { backgroundColor: COLORS.surfaceAlt }, chipText: { color: COLORS.textSub, fontSize: 12, fontWeight: '700' }, chipTextActive: { color: COLORS.accent }, paymentGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 }, payment: { width: '48%', borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, padding: 11, flexDirection: 'row', alignItems: 'center', gap: 8 }, paymentActive: { borderColor: COLORS.accent, backgroundColor: COLORS.surfaceAlt }, paymentText: { color: COLORS.textSub, fontSize: 12, fontWeight: '700' }, paymentTextActive: { color: COLORS.accent }, checkoutTotal: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+const styles: any = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: COLORS.bg },
+  container: { flex: 1, paddingHorizontal: 20 },
+  content: { paddingBottom: 120 },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingTop: 16,
+    paddingBottom: 15,
+  },
+  eyebrow: { color: COLORS.textMuted, fontSize: 12, marginBottom: 4 },
+  title: { color: COLORS.text, fontSize: 27, fontWeight: "800" },
+  scanButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: COLORS.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  searchBox: {
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    gap: 9,
+  },
+  searchInput: { flex: 1, color: COLORS.text, fontSize: 14 },
+  segment: {
+    height: 46,
+    backgroundColor: COLORS.surfaceAlt,
+    borderRadius: 13,
+    padding: 4,
+    flexDirection: "row",
+    marginVertical: 16,
+  },
+  segmentItem: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+  },
+  segmentActive: { backgroundColor: COLORS.surface },
+  segmentText: { color: COLORS.textMuted, fontSize: 13, fontWeight: "700" },
+  segmentTextActive: { color: COLORS.accent },
+  catalogRow: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  catalogIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: COLORS.surfaceAlt,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  catalogInfo: { flex: 1 },
+  catalogTitle: { color: COLORS.text, fontSize: 14, fontWeight: "800" },
+  catalogSubtitle: { color: COLORS.textMuted, fontSize: 11, marginTop: 4 },
+  catalogPrice: { alignItems: "flex-end", gap: 5 },
+  priceText: { color: COLORS.text, fontSize: 13, fontWeight: "800" },
+  cartCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 14,
+    marginTop: 12,
+  },
+  cartHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 9,
+  },
+  cartTitle: { color: COLORS.text, fontSize: 16, fontWeight: "800" },
+  cartCount: { color: COLORS.textMuted, fontSize: 12 },
+  cartRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  cartInfo: { flex: 1 },
+  cartName: { color: COLORS.text, fontSize: 12, fontWeight: "700" },
+  cartPrice: { color: COLORS.textMuted, fontSize: 10, marginTop: 3 },
+  quantity: { flexDirection: "row", alignItems: "center", gap: 7 },
+  quantityText: { color: COLORS.text, fontSize: 13, fontWeight: "800" },
+  cartTotal: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: "800",
+    minWidth: 56,
+    textAlign: "right",
+  },
+  totalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 14,
+    marginBottom: 13,
+  },
+  totalLabel: { color: COLORS.textSub, fontSize: 13, fontWeight: "700" },
+  totalValue: { color: COLORS.text, fontSize: 21, fontWeight: "800" },
+  checkoutButton: {
+    height: 48,
+    backgroundColor: COLORS.accent,
+    borderRadius: 13,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  checkoutText: { color: COLORS.white, fontSize: 13, fontWeight: "800" },
+  empty: { alignItems: "center", paddingTop: 64 },
+  emptyTitle: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: "800",
+    marginTop: 14,
+  },
+  emptyText: { color: COLORS.textMuted, fontSize: 13, marginTop: 5 },
+  camera: {
+    flex: 1,
+    backgroundColor: "#000",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cameraTop: {
+    position: "absolute",
+    top: 60,
+    left: 20,
+    right: 20,
+    alignItems: "center",
+  },
+  closeCamera: {
+    position: "absolute",
+    left: 0,
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    backgroundColor: "#00000070",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cameraTitle: { color: COLORS.white, fontSize: 15, fontWeight: "700" },
+  scanFrame: { width: 260, height: 160, position: "relative" },
+  cornerTL: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: 30,
+    height: 30,
+    borderTopWidth: 3,
+    borderLeftWidth: 3,
+    borderColor: COLORS.white,
+  },
+  cornerTR: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    width: 30,
+    height: 30,
+    borderTopWidth: 3,
+    borderRightWidth: 3,
+    borderColor: COLORS.white,
+  },
+  cornerBL: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    width: 30,
+    height: 30,
+    borderBottomWidth: 3,
+    borderLeftWidth: 3,
+    borderColor: COLORS.white,
+  },
+  cornerBR: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 30,
+    height: 30,
+    borderBottomWidth: 3,
+    borderRightWidth: 3,
+    borderColor: COLORS.white,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "#14223880",
+    justifyContent: "flex-end",
+  },
+  checkoutSheet: {
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    padding: 20,
+    paddingTop: 12,
+  },
+  handle: {
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.border,
+    alignSelf: "center",
+    marginBottom: 18,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 22,
+  },
+  modalTitle: { color: COLORS.text, fontSize: 20, fontWeight: "800" },
+  modalSubtitle: { color: COLORS.textMuted, fontSize: 12, marginTop: 4 },
+  modalLabel: {
+    color: COLORS.textSub,
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 9,
+  },
+  chips: { gap: 8, paddingBottom: 20 },
+  chip: {
+    borderRadius: 11,
+    backgroundColor: COLORS.bg,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  chipActive: { backgroundColor: COLORS.surfaceAlt },
+  chipText: { color: COLORS.textSub, fontSize: 12, fontWeight: "700", padding: 10 },
+  chipTextActive: { color: COLORS.accent },
+  paymentGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 18,
+  },
+  payment: {
+    width: "48%",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  paymentActive: {
+    borderColor: COLORS.accent,
+    backgroundColor: COLORS.surfaceAlt,
+  },
+  paymentText: { color: COLORS.textSub, fontSize: 12, fontWeight: "700" },
+  paymentTextActive: { color: COLORS.accent },
+  checkoutTotal: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+});
+
+Object.assign(styles, {
+  surchargeSummary: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  surchargeSummaryLabel: { color: COLORS.textSub, fontSize: 12 },
+  surchargeSummaryValue: {
+    color: COLORS.success,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  pixCheckout: {
+    alignItems: "center",
+    gap: 9,
+    marginTop: 4,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: COLORS.bg,
+  },
+  pixCheckoutTitle: { color: COLORS.text, fontSize: 14, fontWeight: "800" },
+  pixCheckoutHint: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    textAlign: "center",
+  },
+  pixCheckoutKey: {
+    color: COLORS.textSub,
+    fontSize: 10,
+    textAlign: "center",
+    marginTop: 2,
+  },
+  pixMissing: { color: COLORS.warning, fontSize: 11, marginBottom: 14 },
 });
