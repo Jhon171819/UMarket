@@ -1,90 +1,76 @@
-# 🏪 StoreManager — Expo React Native App
+# UMarket
 
-A full-featured store management app built with Expo and React Native.
+Aplicativo mobile de gestão para pequenos negócios que trabalham com produtos, serviços ou os dois.
 
-## Features
+## O que já funciona
 
-- **📊 Dashboard** — Weekly revenue chart (react-native-chart-kit), daily KPIs, top products, low stock alerts
-- **📦 Stock Management** — Full CRUD for products, category filtering, search by name/barcode, low stock badges
-- **📱 Barcode Scanner** — Camera-based barcode scan (EAN-13/8, QR, Code128, etc.) with sell modal, quantity picker
-- **🧾 Sales History** — Grouped by date, filter by Today / This Week / All
-- **⚙️ More** — Financial overview, inventory value summary
+- Dashboard com faturamento, alertas de estoque, ações rápidas e produtos mais vendidos.
+- Estoque com busca, filtros, cadastro/edição de produtos e ajustes rápidos de quantidade.
+- PDV mobile com produtos e serviços no mesmo carrinho.
+- Leitura de código de barras pela câmera ou busca manual.
+- Cliente opcional e formas de pagamento no fechamento da venda.
+- Histórico de vendas com faturamento, ticket médio e filtros por período.
+- Resumo financeiro e informações do negócio.
+- Persistência local com SQLite: os dados continuam disponíveis depois de fechar e abrir o app.
 
----
+## Stack
 
-## Getting Started
+- Expo SDK 54 + React Native + TypeScript
+- Expo Router
+- Expo Camera
+- Expo SQLite para o banco local-first
+- React Native SVG / Chart Kit disponíveis para evoluções visuais
 
-### Prerequisites
-
-- Node.js 18+
-- Expo CLI: `npm install -g expo`
-- Expo Go app on your phone (for quick testing)
-
-### Install & Run
+## Executar
 
 ```bash
-cd StoreManager
 npm install
-npx expo start
+npm start
 ```
 
-Scan the QR code with **Expo Go** (Android) or the Camera app (iOS).
+Depois, abra com Expo Go no celular ou use `a` / `i` no terminal para Android/iOS.
 
----
+O modo padrão usa `--offline` porque este é um app local-first: ele evita a validação online do Expo, que pode atrasar ou esconder o menu do terminal. O Metro e o QR continuam disponíveis na rede local.
 
-## Project Structure
+Na primeira execução, o Metro pode levar alguns segundos para reconstruir o cache. O comando `start:clear` sempre apaga o cache e deve ser usado somente para recuperação; no uso normal, prefira `npm start`.
 
-```
-StoreManager/
-├── app/
-│   ├── _layout.tsx          # Root layout (wraps StoreProvider)
-│   ├── index.tsx            # Redirects to tabs
-│   └── (tabs)/
-│       ├── _layout.tsx      # Bottom tab navigator
-│       ├── index.tsx        # Dashboard screen
-│       ├── stock.tsx        # Inventory management
-│       ├── scanner.tsx      # Barcode scanner + sell
-│       ├── sales.tsx        # Sales history
-│       └── settings.tsx     # Overview & info
-├── components/
-│   └── theme.ts             # Color palette & font styles
-├── data/
-│   └── StoreContext.tsx     # Global state (products, sales)
-├── app.json                 # Expo config
-└── package.json
+Se ele ficar parado em `Starting Metro Bundler`, encerre a instância com `Ctrl+C` e execute:
+
+```bash
+npm run start:clear
 ```
 
----
+Para emulador ou navegador local, use `npm run start:localhost`. O servidor permanece aberto no terminal enquanto o app está rodando; isso é esperado.
 
-## Barcode Testing
+Para validar o bundle nativo Android:
 
-The app ships with sample products. Use one of these barcodes to test scanning:
+```bash
+npx expo export --platform android
+```
 
-| Barcode         | Product             |
-|-----------------|---------------------|
-| 7894900011517   | Coca-Cola 350ml     |
-| 7896085400026   | Água Mineral 500ml  |
-| 7891000100103   | Leite Integral 1L   |
-| 7896006752711   | Arroz Branco 5kg    |
-| 7896089011112   | Café Pilão 500g     |
+## Modelo de dados
 
-You can print/display a barcode for any of the above and scan it with the app.
+Os valores monetários são armazenados em centavos (`priceCents`, `costCents`, `totalCents`) e formatados somente na interface. O estoque é alterado por ações explícitas de entrada, saída ou venda. O banco local é o arquivo SQLite `umarket.db`, gerenciado pelo Expo SQLite.
 
----
+O acesso ao banco passa por `StoreRepository`, com `SQLiteStoreRepository` ativo hoje e `ApiStoreRepository` preparado para a evolução futura. Assim, a API poderá substituir o adaptador local sem acoplar a UX mobile ao banco. A tabela `migrations` já registra a versão do schema.
 
-## Tech Stack
+## Estrutura
 
-| Library | Purpose |
-|---|---|
-| `expo-router` | File-based navigation |
-| `expo-camera` | Barcode scanning |
-| `react-native-chart-kit` | Weekly revenue chart |
-| `@expo/vector-icons` | Ionicons |
-| `react-native-safe-area-context` | Safe area insets |
+```text
+app/
+  (tabs)/
+    index.tsx       # dashboard
+    stock.tsx       # estoque
+    scanner.tsx     # PDV e scanner
+    sales.tsx       # histórico de vendas
+    settings.tsx    # empresa e financeiro
+data/
+  StoreContext.tsx  # estado local e persistência
+  localDatabase.ts  # schema SQLite e adaptadores local/API
+components/
+  theme.ts          # tokens visuais e formatação monetária
+```
 
----
+## Dados locais
 
-## Notes
-
-- Data is stored **in-memory** only (resets on app restart). For persistence, swap `useState` in `StoreContext.tsx` with `AsyncStorage` calls.
-- Camera permission is requested on first use of the Scanner tab.
+O app inicia sem registros fictícios. Produtos, serviços, clientes e vendas são criados pelo usuário e persistidos no SQLite local. Dados de demonstração, quando necessários para desenvolvimento, devem ser inseridos por um seed explícito e nunca usados como estado inicial do app.

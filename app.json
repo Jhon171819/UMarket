@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "StoreManager",
-    "slug": "store-manager",
-    "icon": "./data/assets/UmarketLogo.png",
+    "name": "UMarket",
+    "slug": "umarket",
+    "icon": "./data/assets/UmarketIcon.png",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "storemanager",
+    "scheme": "umarket",
     "userInterfaceStyle": "automatic",
     "splash": {
       "backgroundColor": "#0F172A"
@@ -34,7 +34,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow StoreManager to access your camera to scan barcodes."
+        "cameraPermission": "Permita que o UMarket use a câmera para ler códigos de barras."
         }
       ],
       "expo-font"

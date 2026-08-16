@@ -1,186 +1,26 @@
-// app/(tabs)/sales.tsx
 import React, { useMemo, useState } from 'react';
-import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView,
-} from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, Sale } from '../../data/StoreContext';
-import { COLORS } from '../../components/theme';
+import { COLORS, money } from '../../components/theme';
 
-const FILTERS = ['All', 'Today', 'This Week'];
+const FILTERS = ['Hoje', '7 dias', 'Tudo'];
 
-function SaleItem({ sale }: { sale: Sale }) {
+function SaleRow({ sale }: { sale: Sale }) {
   const date = new Date(sale.date);
-  const timeStr = date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  const dateStr = date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
-
-  return (
-    <View style={styles.saleCard}>
-      <View style={styles.saleIcon}>
-        <Ionicons name="cart" size={18} color={COLORS.accent} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.saleName} numberOfLines={1}>{sale.productName}</Text>
-        <Text style={styles.saleMeta}>{dateStr} · {timeStr} · {sale.quantity}x units</Text>
-      </View>
-      <Text style={styles.saleTotal}>R${sale.total.toFixed(2)}</Text>
-    </View>
-  );
+  return <View style={styles.saleCard}><View style={[styles.saleIcon, { backgroundColor: sale.itemType === 'SERVICE' ? '#FFF3E5' : COLORS.surfaceAlt }]}><Ionicons name={sale.itemType === 'SERVICE' ? 'construct-outline' : 'cart-outline'} size={19} color={sale.itemType === 'SERVICE' ? COLORS.orange : COLORS.accent} /></View><View style={styles.saleInfo}><View style={styles.saleTitleRow}><Text style={styles.saleName} numberOfLines={1}>Venda #{sale.number}</Text><Text style={styles.saleTotal}>{money(sale.totalCents)}</Text></View><Text style={styles.saleItem} numberOfLines={1}>{sale.quantity}x {sale.itemName}</Text><Text style={styles.saleMeta}>{date.toLocaleDateString('pt-BR')} às {date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · {sale.paymentMethod}{sale.customerName ? ` · ${sale.customerName}` : ''}</Text></View></View>;
 }
 
 export default function SalesScreen() {
   const { sales } = useStore();
-  const [filter, setFilter] = useState('This Week');
+  const [filter, setFilter] = useState('7 dias');
+  const filtered = useMemo(() => { const now = Date.now(); return [...sales].filter(sale => filter === 'Tudo' || (filter === 'Hoje' ? new Date(sale.date).toDateString() === new Date().toDateString() : now - new Date(sale.date).getTime() <= 7 * 86400000)).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); }, [sales, filter]);
+  const total = filtered.reduce((sum, sale) => sum + sale.totalCents, 0);
+  const average = filtered.length ? Math.round(total / filtered.length) : 0;
 
-  const filtered = useMemo(() => {
-    const now = new Date();
-    const todayStr = now.toDateString();
-    return [...sales]
-      .filter(s => {
-        if (filter === 'Today') return new Date(s.date).toDateString() === todayStr;
-        if (filter === 'This Week') {
-          const diff = (now.getTime() - new Date(s.date).getTime()) / (1000 * 60 * 60 * 24);
-          return diff <= 7;
-        }
-        return true;
-      })
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [sales, filter]);
-
-  const totalRevenue = useMemo(() => filtered.reduce((acc, s) => acc + s.total, 0), [filtered]);
-  const totalItems = useMemo(() => filtered.reduce((acc, s) => acc + s.quantity, 0), [filtered]);
-
-  // Group by date
-  const grouped = useMemo(() => {
-    const map: Record<string, Sale[]> = {};
-    filtered.forEach(s => {
-      const key = new Date(s.date).toDateString();
-      if (!map[key]) map[key] = [];
-      map[key].push(s);
-    });
-    return Object.entries(map).map(([date, items]) => ({
-      date,
-      label: formatDateLabel(date),
-      items,
-      total: items.reduce((a, i) => a + i.total, 0),
-    }));
-  }, [filtered]);
-
-  return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Sales History</Text>
-        </View>
-
-        {/* Filter */}
-        <View style={styles.filterRow}>
-          {FILTERS.map(f => (
-            <TouchableOpacity
-              key={f}
-              onPress={() => setFilter(f)}
-              style={[styles.filterChip, filter === f && styles.filterChipActive]}
-            >
-              <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>{f}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Stats */}
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Revenue</Text>
-            <Text style={styles.statValue}>R${totalRevenue.toFixed(2)}</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Transactions</Text>
-            <Text style={styles.statValue}>{filtered.length}</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Items Sold</Text>
-            <Text style={styles.statValue}>{totalItems}</Text>
-          </View>
-        </View>
-
-        {/* Sales List */}
-        <FlatList
-          data={grouped}
-          keyExtractor={item => item.date}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 100 }}
-          renderItem={({ item: group }) => (
-            <View style={styles.group}>
-              <View style={styles.groupHeader}>
-                <Text style={styles.groupLabel}>{group.label}</Text>
-                <Text style={styles.groupTotal}>R${group.total.toFixed(2)}</Text>
-              </View>
-              {group.items.map(sale => (
-                <SaleItem key={sale.id} sale={sale} />
-              ))}
-            </View>
-          )}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Ionicons name="receipt-outline" size={48} color={COLORS.textMuted} />
-              <Text style={styles.emptyText}>No sales found</Text>
-            </View>
-          }
-        />
-      </View>
-    </SafeAreaView>
-  );
+  return <SafeAreaView style={styles.safe} edges={['top']}><View style={styles.container}><View style={styles.header}><View><Text style={styles.title}>Vendas</Text><Text style={styles.subtitle}>Acompanhe tudo o que foi vendido.</Text></View><View style={styles.headerIcon}><Ionicons name="receipt-outline" size={21} color={COLORS.accent} /></View></View><View style={styles.filters}>{FILTERS.map(item => <TouchableOpacity key={item} style={[styles.filter, filter === item && styles.filterActive]} onPress={() => setFilter(item)}><Text style={[styles.filterText, filter === item && styles.filterTextActive]}>{item}</Text></TouchableOpacity>)}</View><View style={styles.summary}><View style={styles.summaryItem}><Text style={styles.summaryLabel}>Faturamento</Text><Text style={styles.summaryValue}>{money(total)}</Text></View><View style={styles.summaryDivider} /><View style={styles.summaryItem}><Text style={styles.summaryLabel}>Vendas</Text><Text style={styles.summaryValue}>{filtered.length}</Text></View><View style={styles.summaryDivider} /><View style={styles.summaryItem}><Text style={styles.summaryLabel}>Ticket médio</Text><Text style={styles.summaryValue}>{money(average)}</Text></View></View><FlatList data={filtered} keyExtractor={item => item.id} renderItem={({ item }) => <SaleRow sale={item} />} contentContainerStyle={styles.list} showsVerticalScrollIndicator={false} ListHeaderComponent={<Text style={styles.listTitle}>Últimas transações</Text>} ListEmptyComponent={<View style={styles.empty}><Ionicons name="receipt-outline" size={42} color={COLORS.textMuted} /><Text style={styles.emptyTitle}>Nenhuma venda neste período</Text><Text style={styles.emptyText}>Quando você concluir uma venda, ela aparecerá aqui.</Text></View>} /></View></SafeAreaView>;
 }
 
-function formatDateLabel(dateStr: string) {
-  const now = new Date();
-  const date = new Date(dateStr);
-  if (date.toDateString() === now.toDateString()) return 'Today';
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return date.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'short' });
-}
-
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: COLORS.bg },
-  container: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
-  header: { paddingTop: 16, paddingBottom: 16 },
-  title: { fontSize: 26, fontWeight: '800', color: COLORS.text, letterSpacing: -0.5 },
-  filterRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  filterChip: {
-    paddingHorizontal: 16, paddingVertical: 8,
-    borderRadius: 20, borderWidth: 1, borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-  },
-  filterChipActive: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
-  filterText: { fontSize: 13, fontWeight: '600', color: COLORS.textSub },
-  filterTextActive: { color: '#fff' },
-  statsRow: { flexDirection: 'row', gap: 8, marginBottom: 20 },
-  statCard: {
-    flex: 1, backgroundColor: COLORS.surface, borderRadius: 14, padding: 12,
-    borderWidth: 1, borderColor: COLORS.border, alignItems: 'center',
-  },
-  statLabel: { fontSize: 11, color: COLORS.textMuted, fontWeight: '600', marginBottom: 4 },
-  statValue: { fontSize: 17, fontWeight: '800', color: COLORS.text },
-  group: { marginBottom: 20 },
-  groupHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10,
-  },
-  groupLabel: { fontSize: 13, fontWeight: '700', color: COLORS.textMuted, textTransform: 'capitalize' },
-  groupTotal: { fontSize: 13, fontWeight: '700', color: COLORS.success },
-  saleCard: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface,
-    borderRadius: 14, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: COLORS.border, gap: 12,
-  },
-  saleIcon: {
-    width: 38, height: 38, borderRadius: 10, backgroundColor: COLORS.accent + '22',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  saleName: { fontSize: 14, fontWeight: '600', color: COLORS.text },
-  saleMeta: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
-  saleTotal: { fontSize: 15, fontWeight: '700', color: COLORS.text },
-  empty: { alignItems: 'center', paddingTop: 80, gap: 12 },
-  emptyText: { color: COLORS.textMuted, fontSize: 15 },
+const styles = StyleSheet.create({ safe: { flex: 1, backgroundColor: COLORS.bg }, container: { flex: 1, paddingHorizontal: 20 }, header: { paddingTop: 16, paddingBottom: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, title: { color: COLORS.text, fontSize: 27, fontWeight: '800' }, subtitle: { color: COLORS.textMuted, fontSize: 12, marginTop: 5 }, headerIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: COLORS.surfaceAlt, alignItems: 'center', justifyContent: 'center' }, filters: { flexDirection: 'row', gap: 8, marginBottom: 14 }, filter: { flex: 1, paddingVertical: 9, borderRadius: 11, alignItems: 'center', backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border }, filterActive: { backgroundColor: COLORS.text, borderColor: COLORS.text }, filterText: { color: COLORS.textSub, fontSize: 12, fontWeight: '700' }, filterTextActive: { color: COLORS.white }, summary: { backgroundColor: COLORS.surface, borderRadius: 17, borderWidth: 1, borderColor: COLORS.border, paddingVertical: 14, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', marginBottom: 22 }, summaryItem: { flex: 1, alignItems: 'center' }, summaryLabel: { color: COLORS.textMuted, fontSize: 10, marginBottom: 5 }, summaryValue: { color: COLORS.text, fontSize: 14, fontWeight: '800' }, summaryDivider: { height: 30, width: 1, backgroundColor: COLORS.border }, list: { paddingBottom: 110 }, listTitle: { color: COLORS.text, fontSize: 16, fontWeight: '800', marginBottom: 10 }, saleCard: { backgroundColor: COLORS.surface, borderRadius: 16, borderWidth: 1, borderColor: COLORS.border, padding: 12, flexDirection: 'row', gap: 10, marginBottom: 9 }, saleIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, saleInfo: { flex: 1 }, saleTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }, saleName: { color: COLORS.text, fontSize: 13, fontWeight: '800', flex: 1 }, saleTotal: { color: COLORS.text, fontSize: 13, fontWeight: '800' }, saleItem: { color: COLORS.textSub, fontSize: 12, marginTop: 5 }, saleMeta: { color: COLORS.textMuted, fontSize: 10, marginTop: 5 }, empty: { alignItems: 'center', paddingTop: 65, paddingHorizontal: 20 }, emptyTitle: { color: COLORS.text, fontSize: 15, fontWeight: '800', marginTop: 13 }, emptyText: { color: COLORS.textMuted, fontSize: 12, textAlign: 'center', lineHeight: 18, marginTop: 5 },
 });

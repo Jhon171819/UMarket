@@ -6,7 +6,7 @@ import { StoreProvider } from '../data/StoreContext';
 export default function RootLayout() {
   return (
     <StoreProvider>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false }} />
     </StoreProvider>
   );

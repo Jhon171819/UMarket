@@ -1,120 +1,174 @@
-// data/StoreContext.tsx
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { storeRepository, StoreSnapshot } from './localDatabase';
 
 export interface Product {
   id: string;
   name: string;
   barcode: string;
-  price: number;
-  cost: number;
+  priceCents: number;
+  costCents: number;
   stock: number;
   category: string;
   lowStockAlert: number;
+  unit: string;
+  active: boolean;
+}
+
+export interface Service {
+  id: string;
+  name: string;
+  priceCents: number;
+  durationMinutes: number;
+  category: string;
+  active: boolean;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  type: 'PRODUCT' | 'SERVICE' | 'BOTH';
+  active: boolean;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  totalSpentCents: number;
 }
 
 export interface Sale {
   id: string;
-  productId: string;
-  productName: string;
+  number: number;
+  itemType: 'PRODUCT' | 'SERVICE';
+  productId?: string;
+  serviceId?: string;
+  itemName: string;
   quantity: number;
-  total: number;
-  date: string; // ISO string
+  totalCents: number;
+  paymentMethod: string;
+  customerName?: string;
+  date: string;
 }
 
 interface StoreContextType {
+  hydrated: boolean;
   products: Product[];
+  services: Service[];
+  categories: Category[];
+  customers: Customer[];
   sales: Sale[];
-  addProduct: (product: Omit<Product, 'id'>) => void;
+  addProduct: (product: Omit<Product, 'id' | 'active'>) => void;
   updateProduct: (id: string, updates: Partial<Product>) => void;
   deleteProduct: (id: string) => void;
-  addSale: (sale: Omit<Sale, 'id' | 'date'>) => void;
+  adjustStock: (id: string, quantity: number) => void;
+  addService: (service: Omit<Service, 'id' | 'active'>) => void;
+  updateService: (id: string, updates: Partial<Service>) => void;
+  deleteService: (id: string) => void;
+  addCategory: (name: string, type?: Category['type']) => void;
+  addCustomer: (customer: Omit<Customer, 'id' | 'totalSpentCents'>) => void;
+  addSale: (sale: Omit<Sale, 'id' | 'number' | 'date'>) => void;
   findByBarcode: (barcode: string) => Product | undefined;
 }
 
 const StoreContext = createContext<StoreContextType | null>(null);
 
-const INITIAL_PRODUCTS: Product[] = [
-  { id: '1', name: 'Coca-Cola 350ml', barcode: '7894900011517', price: 5.5, cost: 3.2, stock: 48, category: 'Beverages', lowStockAlert: 10 },
-  { id: '2', name: 'Água Mineral 500ml', barcode: '7896085400026', price: 2.5, cost: 1.0, stock: 72, category: 'Beverages', lowStockAlert: 20 },
-  { id: '3', name: 'Pão de Forma Integral', barcode: '7896003703034', price: 8.9, cost: 5.5, stock: 12, category: 'Bakery', lowStockAlert: 5 },
-  { id: '4', name: 'Leite Integral 1L', barcode: '7891000100103', price: 5.99, cost: 3.8, stock: 30, category: 'Dairy', lowStockAlert: 10 },
-  { id: '5', name: 'Arroz Branco 5kg', barcode: '7896006752711', price: 24.9, cost: 18.0, stock: 8, category: 'Grains', lowStockAlert: 5 },
-  { id: '6', name: 'Feijão Carioca 1kg', barcode: '7896006752712', price: 9.9, cost: 6.5, stock: 4, category: 'Grains', lowStockAlert: 5 },
-  { id: '7', name: 'Café Pilão 500g', barcode: '7896089011112', price: 18.9, cost: 12.0, stock: 22, category: 'Beverages', lowStockAlert: 8 },
-  { id: '8', name: 'Sabão em Pó 1kg', barcode: '7894900421005', price: 14.5, cost: 9.0, stock: 3, category: 'Cleaning', lowStockAlert: 5 },
-];
-
-function generateSalesForWeek(products: Product[]): Sale[] {
-  const sales: Sale[] = [];
-  const now = new Date();
-  let idCounter = 1;
-
-  for (let daysAgo = 6; daysAgo >= 0; daysAgo--) {
-    const date = new Date(now);
-    date.setDate(date.getDate() - daysAgo);
-    const numSales = Math.floor(Math.random() * 8) + 3;
-
-    for (let i = 0; i < numSales; i++) {
-      const product = products[Math.floor(Math.random() * products.length)];
-      const quantity = Math.floor(Math.random() * 4) + 1;
-      sales.push({
-        id: String(idCounter++),
-        productId: product.id,
-        productName: product.name,
-        quantity,
-        total: parseFloat((product.price * quantity).toFixed(2)),
-        date: date.toISOString(),
-      });
-    }
-  }
-  return sales;
-}
-
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
-  const [sales, setSales] = useState<Sale[]>(() => generateSalesForWeek(INITIAL_PRODUCTS));
+  const [products, setProducts] = useState<Product[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [hydrated, setHydrated] = useState(false);
 
-  const addProduct = (product: Omit<Product, 'id'>) => {
-    const newProduct = { ...product, id: Date.now().toString() };
-    setProducts(prev => [...prev, newProduct]);
+  useEffect(() => {
+    storeRepository.load().then(state => {
+      setProducts(state.products);
+      setServices(state.services);
+      setCategories(state.categories);
+      setCustomers(state.customers);
+      setSales(state.sales);
+      setHydrated(true);
+    }).catch(() => setHydrated(true));
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const state: StoreSnapshot = { products, services, categories, customers, sales };
+    storeRepository.replace(state).catch(() => undefined);
+  }, [products, services, categories, customers, sales, hydrated]);
+
+  const addProduct = (product: Omit<Product, 'id' | 'active'>) => {
+    setProducts(current => [...current, { ...product, id: `p-${Date.now()}`, active: true }]);
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    setProducts(current => current.map(product => product.id === id ? { ...product, ...updates } : product));
   };
 
-  const deleteProduct = (id: string) => {
-    setProducts(prev => prev.filter(p => p.id !== id));
+  const deleteProduct = (id: string) => updateProduct(id, { active: false });
+
+  const adjustStock = (id: string, quantity: number) => {
+    setProducts(current => current.map(product => product.id === id ? { ...product, stock: Math.max(0, product.stock + quantity) } : product));
   };
 
-  const addSale = (sale: Omit<Sale, 'id' | 'date'>) => {
-    const newSale: Sale = {
-      ...sale,
-      id: Date.now().toString(),
-      date: new Date().toISOString(),
-    };
-    setSales(prev => [...prev, newSale]);
-    updateProduct(sale.productId, {});
-    setProducts(prev => prev.map(p =>
-      p.id === sale.productId
-        ? { ...p, stock: Math.max(0, p.stock - sale.quantity) }
-        : p
-    ));
+  const addService = (service: Omit<Service, 'id' | 'active'>) => {
+    setServices(current => [...current, { ...service, id: `s-${Date.now()}`, active: true }]);
   };
 
-  const findByBarcode = (barcode: string) =>
-    products.find(p => p.barcode === barcode);
+  const updateService = (id: string, updates: Partial<Service>) => {
+    setServices(current => current.map(service => service.id === id ? { ...service, ...updates } : service));
+  };
 
-  return (
-    <StoreContext.Provider value={{ products, sales, addProduct, updateProduct, deleteProduct, addSale, findByBarcode }}>
-      {children}
-    </StoreContext.Provider>
-  );
+  const deleteService = (id: string) => updateService(id, { active: false });
+
+  const addCategory = (name: string, type: Category['type'] = 'BOTH') => {
+    const normalized = name.trim();
+    if (!normalized) return;
+    setCategories(current => current.some(category => category.name.toLocaleLowerCase() === normalized.toLocaleLowerCase())
+      ? current
+      : [...current, { id: `cat-${Date.now()}`, name: normalized, type, active: true }]);
+  };
+
+  const addCustomer = (customer: Omit<Customer, 'id' | 'totalSpentCents'>) => {
+    setCustomers(current => [...current, { ...customer, id: `c-${Date.now()}`, totalSpentCents: 0 }]);
+  };
+
+  const addSale = (sale: Omit<Sale, 'id' | 'number' | 'date'>) => {
+    setSales(current => [{ ...sale, id: `sale-${Date.now()}-${current.length}`, number: 1025 + current.length, date: new Date().toISOString() }, ...current]);
+    if (sale.productId) adjustStock(sale.productId, -sale.quantity);
+    if (sale.customerName) {
+      setCustomers(current => current.map(customer => customer.name === sale.customerName
+        ? { ...customer, totalSpentCents: customer.totalSpentCents + sale.totalCents } : customer));
+    }
+  };
+
+  const value = useMemo(() => ({
+    hydrated,
+    products,
+    services,
+    categories,
+    customers,
+    sales,
+    addProduct,
+    updateProduct,
+    deleteProduct,
+    adjustStock,
+    addService,
+    updateService,
+    deleteService,
+    addCategory,
+    addCustomer,
+    addSale,
+    findByBarcode: (barcode: string) => products.find(product => product.barcode === barcode && product.active),
+  }), [hydrated, products, services, categories, customers, sales]);
+
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
 export function useStore() {
-  const ctx = useContext(StoreContext);
-  if (!ctx) throw new Error('useStore must be used inside StoreProvider');
-  return ctx;
+  const context = useContext(StoreContext);
+  if (!context) throw new Error('useStore must be used inside StoreProvider');
+  return context;
 }

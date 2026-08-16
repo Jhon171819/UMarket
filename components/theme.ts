@@ -1,18 +1,20 @@
-// components/theme.ts
 export const COLORS = {
-  bg: '#ffffff',
-  surface: '#ffffff',
-  surfaceAlt: '#7dd815',
-  border: '#0259e6',
-  accent: '#6366F1',
-  accentLight: '#818CF8',
-  success: '#10B981',
+  bg: '#F5F7FB',
+  surface: '#FFFFFF',
+  surfaceAlt: '#EEF4FF',
+  border: '#E4EAF2',
+  accent: '#1264F4',
+  accentDark: '#0D47B5',
+  accentLight: '#6D9EFF',
+  success: '#17A673',
   warning: '#F59E0B',
-  danger: '#EF4444',
-  text: '#0d1e30',
-  textSub: '#140f0f',
-  textMuted: '#8c929c',
-  card: '#ffffff',
+  danger: '#E5484D',
+  orange: '#F28C28',
+  text: '#152238',
+  textSub: '#516078',
+  textMuted: '#8A96A8',
+  card: '#FFFFFF',
+  white: '#FFFFFF',
 };
 
 export const FONTS = {
@@ -21,3 +23,6 @@ export const FONTS = {
   body: { fontFamily: 'System', fontWeight: '400' as const },
   label: { fontFamily: 'System', fontWeight: '600' as const },
 };
+
+export const money = (cents: number) =>
+  (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
