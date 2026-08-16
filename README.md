@@ -1,4 +1,4 @@
-# 🏪 StoreManager — Expo React Native App
+# Umarket
 
 A full-featured store management app built with Expo and React Native.
 
